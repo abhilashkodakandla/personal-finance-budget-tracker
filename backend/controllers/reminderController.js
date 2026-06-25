@@ -1,5 +1,6 @@
 const Reminder = require("../models/Reminder");
 const Expense = require("../models/Expense");
+const Transaction = require("../models/Transaction");
 
 // Create a new reminder
 exports.createReminder = async (req, res) => {
@@ -15,6 +16,22 @@ exports.createReminder = async (req, res) => {
       reminderInterval,
       nextReminderDate: new Date(dueDate),
     });
+
+    // Optional: log a neutral transaction for reminder creation (configuration event)
+    try {
+      await Transaction.create({
+        user: req.user._id,
+        transaction_id: `reminder_${reminder._id}_${Date.now()}`,
+        name: `Reminder set: ${name}`,
+        amount: 0,
+        category: [name],
+        date: new Date(dueDate),
+        payment_channel: "reminder",
+        account_id: "reminder-config",
+      });
+    } catch (e) {
+      console.error("Failed to log reminder transaction:", e?.message || e);
+    }
 
     res.status(201).json(reminder);
   } catch (error) {
@@ -69,7 +86,7 @@ exports.updateReminder = async (req, res) => {
 
     if (paid === true && reminder.recurrence) {
       // Add expense when paid
-      await Expense.create({
+      const expense = await Expense.create({
         user: req.user._id,
         category: reminder.name,  // Use reminder name as expense category
         amount: reminder.amount,
@@ -77,6 +94,22 @@ exports.updateReminder = async (req, res) => {
         date: new Date(),
         transaction_id: randomTransactionId,
       });
+
+      // Log a transaction for this payment (outflow)
+      try {
+        await Transaction.create({
+          user: req.user._id,
+          transaction_id: randomTransactionId,
+          name: reminder.name,
+          amount: -Math.abs(reminder.amount),
+          category: [reminder.name],
+          date: expense.date,
+          payment_channel: "reminder",
+          account_id: "reminder-payment",
+        });
+      } catch (e) {
+        console.error("Failed to log reminder payment transaction:", e?.message || e);
+      }
 
       // Reset for next cycle
       reminder.paid = false;
@@ -86,8 +119,23 @@ exports.updateReminder = async (req, res) => {
       reminder.dueDate = nextDueDate;
       reminder.nextReminderDate = nextDueDate;
     } else if (paid === true && !reminder.recurrence) {
-      // For non-recurring reminders, just mark as paid
+      // For non-recurring reminders, mark as paid and log a one-time transaction
       reminder.remind = false;
+
+      try {
+        await Transaction.create({
+          user: req.user._id,
+          transaction_id: `reminder_pay_${reminder._id}_${Date.now()}`,
+          name: reminder.name,
+          amount: -Math.abs(reminder.amount),
+          category: [reminder.name],
+          date: new Date(),
+          payment_channel: "reminder",
+          account_id: "reminder-payment",
+        });
+      } catch (e) {
+        console.error("Failed to log non-recurring reminder payment transaction:", e?.message || e);
+      }
     }
 
     await reminder.save();

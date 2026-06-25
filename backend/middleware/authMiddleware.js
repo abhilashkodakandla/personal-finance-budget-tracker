@@ -5,15 +5,9 @@ const protect = async (req, res, next) => {
   // Skip protection in test environment and set a mock user
   if (process.env.MODE_ENVIROMENT === 'test') {
     req.user = {
-<<<<<<< HEAD
       _id: '6803d48bbffc189a530ba991',
       name: 'test',
       email: 'test@gmail.com',
-=======
-      _id: '68026479b4acc3c62792fa2c',
-      name: 'vidyadhar challa',
-      email: 'vidyadharchalla333@gmail.com',
->>>>>>> eb39be279fb7f83e975ea8bdfd9d070c41433732
     };
     return next();
   }

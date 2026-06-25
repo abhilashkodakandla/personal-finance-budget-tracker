@@ -1,10 +1,94 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Goal = require("../models/Goal");
 const Expense = require("../models/Expense");
 const Budget = require("../models/Budget");
 require("dotenv").config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+async function generateGeminiText(prompt, generationConfig) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is missing");
+  }
+
+  // Use v1 (not v1beta). v1beta is what was causing 404s.
+  const modelCandidates = [
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-2.0-flash",
+  ];
+
+  let lastErr;
+  for (const model of modelCandidates) {
+    try {
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig,
+          }),
+        }
+      );
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        throw new Error(`Gemini HTTP ${resp.status}: ${errText}`);
+      }
+
+      const data = await resp.json();
+      const text =
+        data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ||
+        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        "";
+      if (!text) {
+        throw new Error("Gemini returned empty response");
+      }
+      return text;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  throw lastErr || new Error("Gemini request failed");
+}
+
+function extractJsonArray(rawText) {
+  // Handles responses with extra text / code fences
+  const match = rawText.match(/\[\s*{[\s\S]*?}\s*\]/);
+  if (!match) return [];
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return [];
+  }
+}
+
+function buildFallbackPredictions(expenses = [], budgets = []) {
+  const byCategory = {};
+  expenses.forEach((e) => {
+    const cat = e.category || "Other";
+    byCategory[cat] = (byCategory[cat] || 0) + Math.abs(e.amount || 0);
+  });
+
+  const top = Object.entries(byCategory)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
+  if (top.length === 0) {
+    return [];
+  }
+
+  return top.map(([category, total], idx) => ({
+    id: idx + 1,
+    category,
+    prediction: `${category} is one of your highest spending categories this period.`,
+    advice: `Set a monthly cap and reduce ${category} spending by 10-15% to improve savings.`,
+    priority: idx === 0 ? "High" : "Medium",
+    expected_savings: Math.round(total * 0.1),
+    color: ["#ef4444", "#f59e0b", "#3b82f6"][idx % 3],
+  }));
+}
 
 exports.getAISuggestions = async (req, res) => {
   try {
@@ -43,27 +127,54 @@ exports.getAISuggestions = async (req, res) => {
       Format the response as a JSON array of objects with fields: id, category, text, priority, impact_amount, action, goal_id, color.
     `;
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1000,
-      },
+    const rawText = await generateGeminiText(prompt, {
+      temperature: 0.7,
+      maxOutputTokens: 1000,
     });
 
-    const result = await model.generateContent(prompt);
-    const rawText = await result.response.text();
-
-    let suggestions = [];
-    const match = rawText.match(/\[\s*{[\s\S]*?}\s*\]/);
-    if (match) {
-      suggestions = JSON.parse(match[0]);
+    const suggestions = extractJsonArray(rawText);
+    if (suggestions.length > 0) {
+      return res.json(suggestions);
     }
 
-    res.json(suggestions);
+    // Fallback suggestions when model response is unparsable
+    return res.json([
+      {
+        id: 1,
+        category: "Savings",
+        text: "Try saving at least 20% of your monthly income before discretionary spending.",
+        priority: "High",
+        impact_amount: 0,
+        action: "Automate transfers to a savings goal every month.",
+        goal_id: null,
+        color: "#10b981",
+      },
+      {
+        id: 2,
+        category: "Spending",
+        text: "Review top expense categories and set tighter limits for non-essential spend.",
+        priority: "Medium",
+        impact_amount: 0,
+        action: "Reduce one high-spend category by 10-15% this month.",
+        goal_id: null,
+        color: "#f59e0b",
+      },
+    ]);
   } catch (err) {
     console.error("AI Suggestions error:", err);
-    res.status(500).json({ error: "Failed to generate suggestions" });
+    // Graceful fallback so UI still works even if Gemini is down
+    res.json([
+      {
+        id: 1,
+        category: "Savings",
+        text: "Track daily expenses and prioritize needs over wants for this month.",
+        priority: "High",
+        impact_amount: 0,
+        action: "Review expenses weekly and adjust budget caps.",
+        goal_id: null,
+        color: "#10b981",
+      },
+    ]);
   }
 };
 
@@ -113,28 +224,23 @@ exports.predictAndAdviseExpenses = async (req, res) => {
       )}
     `;
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        temperature: 0.6,
-        maxOutputTokens: 1000,
-      },
+    const rawText = await generateGeminiText(prompt, {
+      temperature: 0.6,
+      maxOutputTokens: 1000,
     });
 
-    const result = await model.generateContent(prompt);
-    const rawText = await result.response.text();
-
-    console.log("📈 Predict & Advise Response:\n", rawText);
-
-    let predictions = [];
-    const match = rawText.match(/\[\s*{[\s\S]*?}\s*\]/);
-    if (match) {
-      predictions = JSON.parse(match[0]);
+    const predictions = extractJsonArray(rawText);
+    if (predictions.length > 0) {
+      return res.json(predictions);
     }
 
-    res.json(predictions);
+    // Fallback predictions if response format isn't parsable
+    return res.json(buildFallbackPredictions(expenses, budgets));
   } catch (err) {
     console.error("Prediction error:", err);
-    res.status(500).json({ error: "Failed to predict and advise" });
+    // Graceful fallback for runtime/API failures
+    const expenses = await Expense.find({ user: req.user._id });
+    const budgets = await Budget.find({ user: req.user._id });
+    return res.json(buildFallbackPredictions(expenses, budgets));
   }
 };

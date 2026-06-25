@@ -2,6 +2,7 @@ const plaidClient = require("../config/plaidClient");
 const Transaction = require("../models/Transaction");
 const PlaidAccessToken = require("../models/PlaidAccessToken");
 const Expense = require("../models/Expense");
+const { encryptString, decryptString } = require("../utils/fieldCrypto");
 
 // 1. Create Link Token
 exports.createLinkToken = async (req, res) => {
@@ -40,7 +41,7 @@ exports.exchangePublicToken = async (req, res) => {
 
   await PlaidAccessToken.create({
     user: req.user._id,
-    accessToken: response.data.access_token,
+    accessToken: encryptString(response.data.access_token),
     itemId: response.data.item_id,
     institutionName: institution,
   });
@@ -61,8 +62,9 @@ exports.getTransactions = async (req, res) => {
       .split("T")[0];
     const endDate = new Date().toISOString().split("T")[0];
 
+    const plainToken = decryptString(accessDoc.accessToken);
     const response = await plaidClient.transactionsGet({
-      access_token: accessDoc.accessToken,
+      access_token: plainToken,
       start_date: startDate,
       end_date: endDate,
     });

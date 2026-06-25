@@ -21,6 +21,7 @@ app.use('/api/income', require('./routes/incomeRoutes'));
 app.use("/api/plaid", require("./routes/plaidRoutes"));
 app.use("/api/goals", require("./routes/goalRoutes"));
 app.use("/api/advice", require("./routes/adviceRoutes"));
+app.use("/api/households", require("./routes/householdRoutes"));
 app.use("/api/test", require("./routes/testRoute"));
 
 app.use(errorHandler);

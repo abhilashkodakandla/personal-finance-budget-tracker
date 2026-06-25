@@ -1,5 +1,6 @@
 // controllers/incomeController.js
 const Income = require("../models/Income");
+const Transaction = require("../models/Transaction");
 
 exports.createIncome = async (req, res) => {
   const { amount, category, description, month } = req.body; // month in "YYYY-MM" format
@@ -41,6 +42,22 @@ exports.createIncome = async (req, res) => {
       description,
       date: startDate, // Set to first day of the month for consistency
     });
+
+    // Log a transaction for this income (money inflow)
+    try {
+      await Transaction.create({
+        user: req.user._id,
+        transaction_id: `income_${income._id}_${Date.now()}`,
+        name: category || "Income",
+        amount: Number(amount),
+        category: [category],
+        date: startDate,
+        payment_channel: "income",
+        account_id: "income-manual",
+      });
+    } catch (e) {
+      console.error("Failed to log income transaction:", e?.message || e);
+    }
 
     res.status(201).json(income);
   } catch (error) {

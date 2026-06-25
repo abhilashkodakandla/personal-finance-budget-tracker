@@ -4,10 +4,10 @@ import {
   FaChartPie,
   FaDollarSign,
   FaBell,
-  FaCog,
   FaHome,
   FaWallet,
   FaLightbulb,
+  FaUsers,
 } from "react-icons/fa";
 import { getReminders } from "../../services/reminderService";
 
@@ -43,6 +43,7 @@ const Sidebar = () => {
       {/* Navigation Links */}
       <ul className="space-y-4 flex-1">
         <SidebarItem to="/" icon={<FaHome />} label="Dashboard" />
+        <SidebarItem to="/household" icon={<FaUsers />} label="Household" />
         <SidebarItem to="/budget" icon={<FaWallet />} label="Budget Tracker" />
         <SidebarItem
           to="/premium/investments"

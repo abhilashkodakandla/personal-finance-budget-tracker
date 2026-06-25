@@ -12,6 +12,7 @@ import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import { getToken } from "./services/authService";
 import Profile from "./pages/Profile";
+import Household from "./pages/Household";
 import Income from "./pages/Income";
 import MyTransactions from "./pages/MyTransactions";
 import ForgotPassword from "./components/forgot-password/ForgotPassword";
@@ -49,6 +50,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Profile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/household"
+          element={
+            <ProtectedRoute>
+              <Household />
             </ProtectedRoute>
           }
         />

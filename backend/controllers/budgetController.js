@@ -1,6 +1,7 @@
 const Budget = require("../models/Budget");
 const Expense = require("../models/Expense");
 const Income = require("../models/Income");
+const Transaction = require("../models/Transaction");
 
 exports.getBudgets = async (req, res) => {
   const budgets = await Budget.find({ user: req.user._id });
@@ -29,6 +30,22 @@ exports.createBudget = async (req, res) => {
     month,
   });
 
+  // Log a neutral transaction so history reflects the budget creation
+  try {
+    await Transaction.create({
+      user: req.user._id,
+      transaction_id: `budget_${budget._id}_${Date.now()}`,
+      name: `Budget set for ${category}`,
+      amount: 0, // no money movement, just configuration
+      category: [category],
+      date: new Date(`${month || new Date().toISOString().slice(0, 7)}-01`),
+      payment_channel: "budget",
+      account_id: "budget-config",
+    });
+  } catch (e) {
+    console.error("Failed to log budget transaction:", e?.message || e);
+  }
+
   res.status(201).json(budget);
 };
 
@@ -49,6 +66,22 @@ exports.addExpense = async (req, res) => {
       date: date ? new Date(date) : new Date(),
       transaction_id: randomTransactionId,
     });
+
+    // Log a transaction for this expense (money outflow)
+    try {
+      await Transaction.create({
+        user: req.user._id,
+        transaction_id: randomTransactionId,
+        name: description || category || "Expense",
+        amount: -Math.abs(parseFloat(amount)), // outflow as negative
+        category: [category],
+        date: expense.date,
+        payment_channel: "expense",
+        account_id: "expense-manual",
+      });
+    } catch (e) {
+      console.error("Failed to log expense transaction:", e?.message || e);
+    }
 
     const expenseDate = new Date(expense.date);
     const expenseMonth = expenseDate.toISOString().slice(0, 7);
